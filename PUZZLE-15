@@ -1,0 +1,112 @@
+import System.Random (randomRIO)
+import Data.List (elemIndex)
+import Data.Maybe (fromJust)
+import System.IO (hFlush, stdout)
+
+-- Représentation du plateau : liste de 16 entiers (15 tuiles + 0 pour la case vide)
+type Board = [Int]
+
+-- ANSI Colors
+blue, gray, reset :: String
+blue = "\x1b[34m"
+gray = "\x1b[90m"
+reset = "\x1b[0m"
+
+-- Mélange aléatoire d'une liste
+shuffle :: [a] -> IO [a]
+shuffle [] = return []
+shuffle xs = do
+    i <- randomRIO (0, length xs - 1)
+    let (before, x:after) = splitAt i xs
+    rest <- shuffle (before ++ after)
+    return (x : rest)
+
+-- Initialise le plateau avec un mélange valide
+initializeBoard :: IO Board
+initializeBoard = do
+    let solved = [1..15] ++ [0]
+    shuffled <- shuffle solved
+    if isSolvable shuffled then return shuffled else initializeBoard
+
+-- Vérifie la solvabilité du puzzle
+isSolvable :: Board -> Bool
+isSolvable b = inversionsEven && blankOnEvenRow
+  where
+    inversionsEven = even $ length [1 | (i,x) <- zip [0..] b, x /= 0,
+                                        (j,y) <- zip [0..] b, y /= 0,
+                                        i < j, x > y]
+    blankPos = fromJust (elemIndex 0 b)
+    blankOnEvenRow = even (blankPos `div` 4)
+
+-- Affiche le plateau avec couleurs
+displayBoard :: Board -> IO ()
+displayBoard b = do
+    putStrLn "+----+----+----+----+"
+    mapM_ printRow [ [b !! (4*r + c) | c <- [0..3]] | r <- [0..3] ]
+    putStrLn "+----+----+----+----+"
+  where
+    printRow row = do
+        putStr "|"
+        mapM_ (\n -> putStr (format n)) row
+        putStrLn ""
+    format 0 = gray ++ "    " ++ reset ++ "|"
+    format n = blue ++ (if n < 10 then "  " ++ show n else " " ++ show n) ++ reset ++ " |"
+
+-- Vérifie si un mouvement est possible
+isValidMove :: Board -> Char -> Bool
+isValidMove b dir = case dir of
+    'w' -> blankPos > 3
+    's' -> blankPos < 12
+    'a' -> blankPos `mod` 4 /= 0
+    'd' -> blankPos `mod` 4 /= 3
+    _   -> False
+  where blankPos = fromJust (elemIndex 0 b)
+
+-- Applique un mouvement sur le plateau
+makeMove :: Board -> Char -> Board
+makeMove b dir =
+    let blankPos = fromJust (elemIndex 0 b)
+        swapPos = case dir of
+                   'w' -> blankPos - 4
+                   's' -> blankPos + 4
+                   'a' -> blankPos - 1
+                   'd' -> blankPos + 1
+        in [ if i == blankPos then b !! swapPos
+             else if i == swapPos then 0
+             else b !! i
+           | i <- [0..15] ]
+
+-- Vérifie si le puzzle est résolu
+isSolved :: Board -> Bool
+isSolved = (== [1..15] ++ [0])
+
+-- Boucle principale du jeu
+gameLoop :: Board -> Int -> IO ()
+gameLoop b moves = do
+    putStrLn $ "\nNombre de coups : " ++ show moves
+    displayBoard b
+    if isSolved b then
+        putStrLn $ "\n🎉 Félicitations ! Vous avez résolu le puzzle en " ++ show moves ++ " coups."
+    else do
+        putStr "Déplacement (w=↑ s=↓ a=← d=→ q=quitter) : "
+        hFlush stdout
+        input <- getLine
+        case input of
+            [c] | c `elem` "wasd" ->
+                if isValidMove b c then
+                    gameLoop (makeMove b c) (moves + 1)
+                else do
+                    putStrLn "❌ Mouvement invalide !"
+                    gameLoop b moves
+            "q" -> putStrLn "👋 Au revoir !"
+            _   -> do
+                putStrLn "❗ Entrée invalide. Utilisez uniquement w, a, s, d ou q."
+                gameLoop b moves
+
+-- Point d'entrée
+main :: IO ()
+main = do
+    putStrLn "=== 🎮 PUZZLE-15 TERMINAL ==="
+    putStrLn "Reconstituez les nombres dans l'ordre en déplaçant les tuiles."
+    board <- initializeBoard
+    gameLoop board 0
